@@ -15,7 +15,7 @@
 
 # 1.初始化new Vue({})里面的属性
 
-1. 创建 **this._init()** 方法进行初始化，通过**initMixin**传入Vue对象进行初始化，在里面定义 **_init() ** 方法挂载到Vue原型上Vue.prototype._init = function() {}
+1. 创建 **this._init()** 方法进行初始化，通过**initMixin**传入Vue对象进行初始化，在里面定义 **_init() ** 方法挂载到Vue原型上**Vue.prototype._init = function() {}**
 
    ```js
    function Vue(options) {
@@ -169,7 +169,39 @@
 
    
 
-2. s
+2. 将 **$mout** 挂载到VUE的原型上，传入**el =》 #app**，通过**document.querySelector(el)**获取 **html** 的元素，挂载到VUE的原型 **$el** 上，判断 **options** 上是否有 **render** 模板
+
+   - 无：通过 **el = el.outerHTML** 获取纯HTML字符串，传入HTML字符串调用 **compileToFunction(el)** 方法生成 **render函数**
+
+   ```js
+   Vue.prototype.$mount = function (el) {
+       let vm = this;
+       // 获取的dom
+       console.log("el", el);
+       el = document.querySelector(el);
+       vm.$el = el;
+       let options = vm.$options;
+       if (!options.render) {
+         // 没有进入
+         let template = options.template;
+         if (!template && el) {
+           // 没有进入
+           // 获取 html
+           el = el.outerHTML;
+           console.log("HTML", el);
+           // 为这个Html 改变成 ast抽象语法树
+           let render = compileToFunction(el);
+           //(1) 将render  函数变成vnode  (2) vnode 变成 真实DOM 放到页面上去
+           options.render = render;
+           console.log("this-vm", vm);
+         }
+       }
+       //挂载组件
+       mounetComponent(vm, el); // vm._updata vm._render
+     };
+   ```
+
+   
 
 3. 
 
