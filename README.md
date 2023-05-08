@@ -151,11 +151,135 @@
      })
      ```
 
-     
 
-5. sd
 
-# 2.渲染模板 el --- #app
+
+# 2.添加生命周期
+
+1. 在各个阶段添加对应的生命周期：**beforeCreated **，**created **，**beforeMounted**，**mounted**，都挂载到了Vue的原型$options上
+
+```js
+// 生命周期的调用
+export function callHook(vm, hook) {
+  console.log(hook, "生命周期：", vm.$options[hook]);
+  const handlers = vm.$options[hook];
+  if (handlers) {
+    for (let i = 0; i < handlers.length; i++) {
+      handlers[i].call(this); // 改变生命周期中this指向问题
+    }
+  }
+}
+```
+
+
+
+# 3.全局方法  Vue.mixin Vue.component Vue.extend
+
+1. 定义全局 **Mixin方法** 进行调用
+
+   ```js
+   //响应式  vue2  mvvm
+   Vue.Mixin({
+       //全局
+       created: function a() {
+           console.log("a----2");
+       },
+   });
+   Vue.Mixin({
+       //全局
+       created: function b() {
+           console.log("b----2");
+       },
+   });
+   ```
+
+   
+
+2. 在初始化调用 **initGlobApi(Vue)** ，在Vue原型上挂载 **Mixin** 方法，里面的参数对应：**this** 指向 **Vue的实例**，**this.options = Vue.options** ，**minix** 指向调用传入的参数 全局：**Vue.Mixin({入参})**。
+
+   ```js
+   export function initGlobApi(Vue) {
+     Vue.options = {};
+     Vue.Mixin = function (mixin) {
+       // 对象的合并
+       this.options = mergeOptions(this.options, mixin);
+       console.log("Vue.options", Vue.options);
+     };
+   }
+   ```
+
+   
+
+3. **策略模式** 将多个全局的 **Minix方法** 合并在一起
+
+   ```js
+   // 对象合并 生命周期
+   export const HOOKS = [
+     "beforeCreate",
+     "created",
+     "beforeMount",
+     "mounted",
+     "beforeUpdate",
+     "updated",
+     "beforeDestory",
+     "destroyed",
+   ];
+   
+   // 策略模式
+   let starts = {};
+   starts.data = function (parentVal, childVal) {
+     return childVal;
+   };
+   starts.computed = function () {}; // 合并computed
+   starts.watch = function () {}; // 合并watch
+   starts.methods = function () {}; // 合并methods
+   // 遍历生命周期
+   HOOKS.forEach((hooks) => {
+     starts[hooks] = mergeHook;
+   });
+   
+   function mergeHook(parentVal, childVal) {
+     if (childVal) {
+       if (parentVal) {
+         return parentVal.concat(childVal);
+       } else {
+         return [childVal];
+       }
+     } else {
+       return parentVal;
+     }
+   }
+   
+   export function mergeOptions(parent, child) {
+     const options = {};
+     // 如果有父亲 ，没有儿子
+     for (let key in parent) {
+       mergeField(key);
+     }
+     // 儿子有-父亲没有
+     for (let key in child) {
+       mergeField(key);
+     }
+     function mergeField(key) {
+       // 根据key   策略模式
+       if (starts[key]) {
+         options[key] = starts[key](parent[key], child[key]);
+       } else {
+         options[key] = child[key];
+       }
+     }
+     return options;
+   }
+   
+   ```
+
+   
+
+4. 
+
+
+
+# 5.渲染模板 el --- #app
 
 1. 将 **$mount** 方法挂载到VUE原型上，调用 **$mount()** 方法传入 **vm.$options.el** =》 **#app**
 
@@ -201,7 +325,39 @@
      };
    ```
 
-   
+   #### 步骤：
+
+   1. **将html 变成ast 语法树**
+
+   2. **ast 语法树变成 render 函数  （1） ast 语法树变成 字符串**
+
+   3. **将render 字符串变成 函数**
+
+      ```js
+      export function compileToFunction(el) {
+        //1 将html 变成ast 语法树
+        let ast = parseHTML(el);
+        console.log("ast", ast);
+        //2 ast 语法树变成 render 函数  （1） ast 语法树变成 字符串  （2）字符串变成函数
+        let code = generate(ast); // _c _v _s
+        console.log("code", code);
+        // 3将render 字符串变成 函数
+        let render = new Function(`with(this){return ${code}}`);
+        console.log("render", render);
+        return render;
+      }
+      
+      ```
+
+      
+
+   4. **内部是通过：**这些都是挂载到原型Vue上
+
+      ```tex
+      '_c()'的方法是处理标签，'_v()'方法是处理文本，'_s()'方法是处理变量。
+      ```
+
+      
 
 3. 
 
