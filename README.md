@@ -275,7 +275,121 @@ export function callHook(vm, hook) {
 
    
 
-4. 
+4. s
+
+# 4.依赖收集、派发更新
+
+1. **watcher.js** 观察者：作为一个中介，当数据发生变化时，通过watcher中转通知组件。watcher实例分为渲染watcher、计算watcher、侦听器watcher
+
+   ```js
+   import { pushTarget, popTarget } from "./dep";
+   
+   //为什么封装成一个类 ，方便我们的扩展
+   let id = 0; //全局的
+   class Watcher {
+     //vm 实例
+     //exprOrfn vm._updata(vm._render())
+     constructor(vm, exprOrfn, cb, options) {
+       // 1.创建类第一步将选项放在实例上
+       this.vm = vm;
+       this.exprOrfn = exprOrfn;
+       this.cb = cb;
+       this.options = options;
+       // 2. 每一组件只有一个watcher 他是为标识
+       this.id = id++;
+       // 3.判断表达式是不是一个函数
+       this.deps = []; //watcher 记录有多少dep 依赖
+       this.depsId = new Set();
+       if (typeof exprOrfn === "function") {
+         this.getter = exprOrfn;
+       }
+       // 4.执行渲染页面
+       this.get();
+     }
+     addDep(dep) {
+       //去重  判断一下 如果dep 相同我们是不用去处理的
+       let id = dep.id;
+       //  console.log(dep.id)
+       if (!this.depsId.has(id)) {
+         this.deps.push(dep);
+         this.depsId.add(id);
+         //同时将watcher 放到 dep中
+         // console.log(666)
+         dep.addSub(this);
+       }
+       // 现在只需要记住  一个watcher 有多个dep,一个dep 有多个watcher
+       //为后面的 component
+     }
+     get() {
+       // Dep.target = watcher
+   
+       pushTarget(this); //当前的实例添加
+       this.getter(); // 渲染页面  render()   with(wm){_v(msg,_s(name))} ，取值（执行get这个方法） 走劫持方法
+       popTarget(); //删除当前的实例 这两个方法放在 dep 中
+     }
+     //问题：要把属性和watcher 绑定在一起   去html页面
+     // (1)是不是页面中调用的属性要和watcher 关联起来
+     //方法
+     //（1）创建一个dep 模块
+     updata() {
+       this.get(); //重新渲染
+     }
+   }
+   
+   export default Watcher;
+   
+   ```
+
+   
+
+2. **dep.js  **订阅者：用于收集当前响应式对象的依赖
+
+   ```js
+   let id = 0;
+   class Dep {
+     constructor() {
+       this.subs = [];
+       this.id = id++;
+     }
+     //收集watcher
+     depend() {
+       //我们希望water 可以存放 dep
+       //实现双休记忆的，让watcher 记住
+       //dep同时，让dep也记住了我们的watcher
+       Dep.targer.addDep(this);
+       // this.subs.push(Dep.targer) // id：1 记住他的dep
+     }
+     addSub(watcher) {
+       this.subs.push(watcher);
+     }
+     //更新
+     notify() {
+       // console.log(Dep.targer)
+       this.subs.forEach((watcher) => {
+         watcher.updata();
+       });
+     }
+   }
+   
+   //dep  和 watcher 关系
+   Dep.targer = null;
+   export function pushTarget(watcher) {
+     //添加 watcher
+   
+     Dep.targer = watcher; //保留watcher
+     // console.log(Dep.targer)
+   }
+   export function popTarget() {
+     Dep.targer = null; //将变量删除
+   }
+   export default Dep;
+   //多对多的关系
+   //1. 一个属性有一个dep ,dep 作用：用来收集watcher的
+   //2. dep和watcher 关系：(1)dep 可以存放多个watcher  (2):一个watcher可以对应多个dep
+   
+   ```
+
+   
 
 
 
