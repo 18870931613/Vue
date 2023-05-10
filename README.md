@@ -283,6 +283,7 @@ export function callHook(vm, hook) {
 
    ```js
    import { pushTarget, popTarget } from "./dep";
+   import { nextTick } from "../utils/nextTick";
    
    //为什么封装成一个类 ，方便我们的扩展
    let id = 0; //全局的
@@ -320,6 +321,9 @@ export function callHook(vm, hook) {
        // 现在只需要记住  一个watcher 有多个dep,一个dep 有多个watcher
        //为后面的 component
      }
+     run() {
+       this.get();
+     }
      get() {
        // Dep.target = watcher
    
@@ -332,7 +336,46 @@ export function callHook(vm, hook) {
      //方法
      //（1）创建一个dep 模块
      updata() {
-       this.get(); //重新渲染
+       //三次
+       //注意：不要数据更新后每次都调用 get 方法 ，get 方法回重新渲染
+       //缓存
+       // this.get(); //重新渲染
+       queueWatcher(this);
+     }
+   }
+   
+   let queue = []; // 将需要批量更新的watcher 存放到一个列队中
+   let has = {};
+   let pending = false;
+   function flushWatcher() {
+     queue.forEach((item) => {
+       item.run(), item.cb();
+     });
+     queue = [];
+     has = {};
+     pending = false;
+   }
+   
+   function queueWatcher(watcher) {
+     let id = watcher.id; // 每个组件都是同一个 watcher
+     //    console.log(id) //去重
+     if (has[id] == null) {
+       //去重
+       //列队处理
+       queue.push(watcher); //将wacher 添加到列队中
+       has[id] = true;
+       //防抖 ：用户触发多次，只触发一个
+       if (!pending) {
+         //异步：等待同步代码执行完毕之后，再执行
+         // setTimeout(()=>{
+         //   queue.forEach(item=>item.run())
+         //   queue = []
+         //   has = {}
+         //   pending = false
+         // },0)
+         nextTick(flushWatcher); //  nextTick相当于定时器
+       }
+       pending = true;
      }
    }
    
@@ -340,7 +383,56 @@ export function callHook(vm, hook) {
    
    ```
 
-   
+   - **queueWatcher方法** 是处理防止多次渲染
+
+     每个组件都有自己的watcher对应的id唯一性，将id保存到has{}对象中，确保去重，不存在就添加到队列中，设置防抖 ：用户触发多次，只触发一次 **nextTick** 来完成处理。
+
+   - **nextTick方法** 
+
+     将nextTick挂载到Vue原型上：
+
+     第一种Vue自己的nextTick用来处理多次触发执行。
+     第二种是用户的nextTick用来元素已经加载完之后再进行逻辑处理。
+
+     ```js
+      let callback = []
+      let pending = false
+      function flush(){
+         callback.forEach(cb =>cb())
+         pending =false
+      }
+      let timerFunc
+      //处理兼容问题
+      if(Promise){
+         timerFunc = ()=>{
+             Promise.resolve().then(flush) //异步处理
+         }
+      }else if(MutationObserver){ //h5 异步方法 他可以监听 DOM 变化 ，监控完毕之后在来异步更新
+        let observe = new MutationObserver(flush)
+        let textNode = document.createTextNode(1) //创建文本
+        observe.observe(textNode,{characterData:true}) //观测文本的内容
+        timerFunc = ()=>{
+         textNode.textContent = 2
+        }
+      }else if(setImmediate){ //ie
+         timerFunc = ()=>{
+             setImmediate(flush) 
+         }
+      }
+      export function nextTick(cb){
+          // 1vue 2
+         //  console.log(cb)
+          //列队 [cb1,cb2]
+          callback.push(cb)
+          //Promise.then()  vue3
+          if(!pending){
+              timerFunc()   //这个方法就是异步方法 但是 处理兼容问题
+              pending = true
+          }
+      }
+     ```
+
+     
 
 2. **dep.js  **订阅者：用于收集当前响应式对象的依赖
 
