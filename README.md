@@ -173,7 +173,7 @@ export function callHook(vm, hook) {
 
 
 
-# 3.全局方法  Vue.mixin Vue.component Vue.extend
+# 3.全局方法  Vue.mixin
 
 1. 定义全局 **Mixin方法** 进行调用
 
@@ -277,7 +277,7 @@ export function callHook(vm, hook) {
 
 4. s
 
-# 4.依赖收集、派发更新
+# 4.依赖收集、派发更新（watcher,dep）
 
 1. **watcher.js** 观察者：作为一个中介，当数据发生变化时，通过watcher中转通知组件。watcher实例分为渲染watcher、计算watcher、侦听器watcher
 
@@ -296,16 +296,31 @@ export function callHook(vm, hook) {
        this.exprOrfn = exprOrfn;
        this.cb = cb;
        this.options = options;
+       // computed 计算属性
+       this.lazy = options.lazy; // 如果这个watcher 上有lazy 说明是 computed
+       this.dirty = this.lazy; // dirty  表示用户是否执行
        // 2. 每一组件只有一个watcher 他是为标识
        this.id = id++;
+       this.user = !!options.user;
        // 3.判断表达式是不是一个函数
        this.deps = []; //watcher 记录有多少dep 依赖
        this.depsId = new Set();
        if (typeof exprOrfn === "function") {
          this.getter = exprOrfn;
+       } else {
+         //{a,b,c}  字符串 变成函数
+         this.getter = function () {
+           //属性 c.c.c
+           let path = exprOrfn.split(".");
+           let obj = vm;
+           for (let i = 0; i < path.length; i++) {
+             obj = obj[path[i]];
+           }
+           return obj; //
+         };
        }
        // 4.执行渲染页面
-       this.get();
+       this.value = this.lazy ? void 0 : this.get(); //保存watch 初始值
      }
      addDep(dep) {
        //去重  判断一下 如果dep 相同我们是不用去处理的
@@ -322,25 +337,51 @@ export function callHook(vm, hook) {
        //为后面的 component
      }
      run() {
-       this.get();
+       //old new
+       let value = this.get(); //new
+       let oldValue = this.value; //old
+       this.value = value;
+       //执行 hendler (cb) 这个用户wathcer
+       if (this.user) {
+         this.value = this.cb.call(this.vm, value, oldValue);
+       }
      }
      get() {
        // Dep.target = watcher
    
        pushTarget(this); //当前的实例添加
-       this.getter(); // 渲染页面  render()   with(wm){_v(msg,_s(name))} ，取值（执行get这个方法） 走劫持方法
+       const value = this.getter.call(this.vm); // 渲染页面  render()   with(wm){_v(msg,_s(name))} ，取值（执行get这个方法） 走劫持方法
        popTarget(); //删除当前的实例 这两个方法放在 dep 中
+       return value;
      }
      //问题：要把属性和watcher 绑定在一起   去html页面
      // (1)是不是页面中调用的属性要和watcher 关联起来
      //方法
      //（1）创建一个dep 模块
      updata() {
-       //三次
        //注意：不要数据更新后每次都调用 get 方法 ，get 方法回重新渲染
        //缓存
-       // this.get(); //重新渲染
-       queueWatcher(this);
+       // this.get() //重新渲染
+       // queueWatcher(this)
+       if (this.lazy) {
+         // 这是计算属性的watcher
+         this.dirty = true;
+       } else {
+         queueWatcher(this); //重新渲染
+       }
+     }
+     evaluate() {
+       this.value = this.get();
+       this.dirty = false;
+     }
+     // 相互依赖
+     depend() {
+       // 收集watcher, 存放到dep dep在会存放我的watcher
+       // 通过这个 watcher 找到对应的所有的 dep, 在让所有的 dep 都记住 这渲染的watcher
+       let i = this.deps.length;
+       while (i--) {
+         this.deps[i].depend();
+       }
      }
    }
    
@@ -349,13 +390,13 @@ export function callHook(vm, hook) {
    let pending = false;
    function flushWatcher() {
      queue.forEach((item) => {
-       item.run(), item.cb();
+       item.run();
+       // item.cb()
      });
      queue = [];
      has = {};
      pending = false;
    }
-   
    function queueWatcher(watcher) {
      let id = watcher.id; // 每个组件都是同一个 watcher
      //    console.log(id) //去重
@@ -366,7 +407,7 @@ export function callHook(vm, hook) {
        has[id] = true;
        //防抖 ：用户触发多次，只触发一个
        if (!pending) {
-         //异步：等待同步代码执行完毕之后，再执行
+         //异步：等待同步    代码执行完毕之后，再执行
          // setTimeout(()=>{
          //   queue.forEach(item=>item.run())
          //   queue = []
@@ -465,14 +506,21 @@ export function callHook(vm, hook) {
    
    //dep  和 watcher 关系
    Dep.targer = null;
+   // 处理多个watcher
+   let stack = []; // 栈
    export function pushTarget(watcher) {
      //添加 watcher
    
      Dep.targer = watcher; //保留watcher
      // console.log(Dep.targer)
+     // 入栈
+     stack.push(watcher);
    }
    export function popTarget() {
-     Dep.targer = null; //将变量删除
+     // Dep.targer = null; //将变量删除
+     // 解析完成一个watcher 就删除一个watcher [ watcher1, watcher2]
+     stack.pop();
+     Dep.targer = stack[stack.length -1] // 获取到你前面的一个 watcher
    }
    export default Dep;
    //多对多的关系
@@ -483,9 +531,217 @@ export function callHook(vm, hook) {
 
    
 
+   - 对数据进行劫持(data)：
+
+     - get()方法触发通过Dep收集这个属性对象，某一个属性对象都有自己唯一的watcher，id。
+     - set()方法调用会触发Dep中的notify()方法去通知数据发生改变，从而组件发生跟新。内部其实就是调用get()的方法去跟新。
+
+     ```js
+     //对数据进行劫持
+     function defineReactive(data, key, value) {
+       // Object.defineProperty
+       let chilidDep = Observer(value); //获取到数组对应的dep
+       //1给我们的每个属性添加一个dep
+       let dep = new Dep();
+       //2将dep 存放起来，当页面取值时，说明这个值用来渲染，在将这个watcher和这个属性对应起来
+       Object.defineProperty(data, key, {
+         get() {
+           //依赖收集
+           // console.log('获取数据', data, key, value)
+           if (Dep.targer) {
+             //让这个属性记住这个watcher
+             dep.depend();
+             //3当我们对arr取值的时候 我们就让数组的dep记住这个watcher
+             if (chilidDep) {
+               chilidDep.dep.depend(); //数组收集watcher
+             }
+           }
+           //检测一下 dep
+           //获取arr的值，会调用get 方法 我希望让当前数组记住这个渲染watcher
+     
+           // console.log(dep.subs)
+           return value;
+         },
+         set(newValue) {
+           //依赖更新
+           //注意设置的值和原来的值是一样的
+           // console.log('设置值', data, key, value)
+           if (newValue == value) return;
+           Observer(newValue); //如果用户将值改为对象继续监控
+           value = newValue;
+           dep.notify();
+         },
+       });
+     }
+     ```
+
+     
+
+   - 数组：**当属性对象调用具有响应式方法的时候，通过调用dep.notify()通知跟新**
+
+# 5.监听器Watch
+
+1. 初始化获取**watch**对象有多种编写方式，通过**createrWatcher()**方法处理获取**vm实例对象，exprOrfn属性名称，handler函数方法，options配置项**。
+
+   ```js
+   export function stateMixin(vm) {
+     //列队 :1就是vue自己的nextTick  2用户自己的
+     (vm.prototype.$nextTick = function (cb) {
+       //nextTick: 数据更新之后获取到最新的DOM
+       nextTick(cb);
+     }),
+       (vm.prototype.$watch = function (Vue, exprOrfn, handler, options = {}) {
+         //上面格式化处理
+         //实现watch 方法 就是new  watcher //渲染走 渲染watcher $watch 走 watcher  user false
+         //  watch 核心 watcher
+         let watcher = new Watcher(Vue, exprOrfn, handler, {
+           ...options,
+           user: true,
+         });
+         if (options.immediate) {
+           handler.call(Vue); //如果有这个immediate 立即执行
+         }
+       });
+   }
+   function initWatch(vm) {
+     //1 获取watch
+     let watch = vm.$options.watch;
+     //2 遍历  { a,b,c}
+     for (let key in watch) {
+       //2.1获取 他的属性对应的值 （判断)
+       let handler = watch[key]; //数组 ，对象 ，字符，函数
+       if (Array.isArray(handler)) {
+         //数组  []
+         hendler.forEach((item) => {
+           createrWatcher(vm, key, item);
+         });
+       } else {
+         //对象 ，字符，函数
+         //3创建一个方法来处理
+         createrWatcher(vm, key, handler);
+       }
+     }
+   }
+   
+   //vm.$watch(()=>{return 'a'}) // 返回的值就是  watcher 上的属性 user = false
+   //格式化处理
+   function createrWatcher(vm, exprOrfn, handler, options) {
+     //3.1 处理handler
+     if (typeof handler === "object") {
+       options = handler; //用户的配置项目
+       handler = handler.handler; //这个是一个函数
+     }
+     if (typeof handler === "string") {
+       // 'aa'
+       handler = vm[handler]; //将实例行的方法作为 handler 方法代理和data 一样
+     }
+     //其他是 函数
+     //watch 最终处理 $watch 这个方法
+     return vm.$watch(vm, exprOrfn, handler, options);
+   }
+   ```
+
+   
+
+2. 调用**$watch(Vue, exprOrfn, handler, options = {})**
+
+3. 第一次会先触发一次会保留原始值，当数据发生改变时，(watcher,dep)会触发调用run()方法，保留最新的值
+
+   ```js
+   // 执行渲染页面
+   this.value = this.lazy ? void 0 : this.get(); //保存watch 初始值
+   run() {
+       //old new
+       let value = this.get(); //new
+       let oldValue = this.value; //old
+       this.value = value;
+       //执行 hendler (cb) 这个用户wathcer
+       if (this.user) {
+           this.value = this.cb.call(this.vm, value, oldValue);
+       }
+   }
+   ```
+
+   
+
+4. 无
 
 
-# 5.渲染模板 el --- #app
+
+# 6.计数属性computed
+
+1. 初始化获取computed对象里面的值，遍历为某一个属性值通过 **defineComputed **配置。
+
+   ```js
+   function initComputed(vm, computed) {
+     // 存放计算属性的watcher
+     const watchers = (vm._computedWatchers = {});
+     for (const key in computed) {
+       const userDef = computed[key];
+       // 获取get方法
+       const getter = typeof userDef === "function" ? userDef : userDef.get;
+       // 创建计算属性watcher
+       watchers[key] = new Watcher(vm, getter, () => {}, { lazy: true });
+       defineComputed(vm, key, getter);
+     }
+   }
+   let sharedPropertyDefinition = {};
+   function defineComputed(target, key, userDef) {
+     sharedPropertyDefinition = {
+       enumerable: true,
+       configurable: true,
+       get: () => {},
+       set: () => {},
+     };
+     if (typeof userDef === "function") {
+       sharedPropertyDefinition.get = createComputedGetter(key);
+     } else {
+       sharedPropertyDefinition.get = createComputedGetter(userDef.get);
+       sharedPropertyDefinition.set = userDef.set;
+     }
+     // 使用defineProperty定义
+     Object.defineProperty(target, key, sharedPropertyDefinition);
+   }
+   
+   ```
+
+   
+
+2. 缓存机制通过dirty属性控制，获取值通过get()方法调用将值存返回出去存储起来。
+
+   ```js
+   function createComputedGetter(key) {
+     return function computedGetter() {
+       const watcher = this._computedWatchers[key];
+       if (watcher) {
+         if (watcher.dirty) {
+           // 如果dirty为true
+           watcher.evaluate(); // 计算出新值，并将dirty 更新为false
+         }
+         // 判断一下有没有渲染的watcher 有执行： 相互存放 watcher
+         if (Dep.targer) {
+           // 说明还有渲染的watcher，收集起来
+           watcher.depend(); // watcher 收集
+         }
+         // 如果依赖的值不发生变化，则返回上次计算的结果
+         return watcher.value;
+       }
+     };
+   }
+   get() {
+       // Dep.target = watcher
+       pushTarget(this); //当前的实例添加
+       const value = this.getter.call(this.vm); // 渲染页面  render()   with(wm){_v(msg,_s(name))} ，取值（执行		get这个方法） 走劫持方法
+       popTarget(); //删除当前的实例 这两个方法放在 dep 中
+       return value;
+   }
+   ```
+
+   
+
+3. 无
+
+# 7.渲染模板 el --- #app
 
 1. 将 **$mount** 方法挂载到VUE原型上，调用 **$mount()** 方法传入 **vm.$options.el** =》 **#app**
 
